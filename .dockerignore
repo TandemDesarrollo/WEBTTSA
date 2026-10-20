@@ -1,0 +1,14 @@
+.git
+**/.git
+WEBTTSA
+__MACOSX
+**/__MACOSX
+**/.DS_Store
+**/._*
+.env
+.env.*
+!.env.example
+*.md
+*.zip
+.dockerignore
+.gitignore

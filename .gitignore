@@ -1,0 +1,20 @@
+# Entorno local
+.env
+.env.local
+.env.*.local
+
+# Sistema / basura
+.DS_Store
+Thumbs.db
+**/._*
+__MACOSX/
+
+# Carpeta del repo original de Tandem (no incluir en este repo)
+WEBTTSA/
+
+# Docker / IDE
+*.log
+.idea/
+.vscode/
+*.swp
+*.zip

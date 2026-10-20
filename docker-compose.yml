@@ -1,0 +1,16 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: webttsa:local
+    container_name: webttsa
+    ports:
+      - "${PORT:-8080}:8080"
+    restart: unless-stopped
+    # Filesystem de solo lectura; tmpfs con uid del usuario nginx (101)
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:uid=101,gid=101,mode=0755
+      - /var/run:uid=101,gid=101,mode=0755
+      - /tmp:uid=101,gid=101,mode=1777

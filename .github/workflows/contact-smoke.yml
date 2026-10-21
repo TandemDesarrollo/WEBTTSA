@@ -1,0 +1,187 @@
+name: Contact smoke
+
+# A single event type avoids duplicate push + PR runs for the same branch.
+on:
+  push:
+    branches: [fix/contact-footer, main]
+
+permissions:
+  contents: read
+
+jobs:
+  contact-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SMOKE_PROJECT: webttsa-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      SMTP_HOST: ""
+      SMTP_PORT: ""
+      SMTP_SECURITY: ""
+      SMTP_TIMEOUT: ""
+      SMTP_USERNAME: ""
+      SMTP_PASSWORD: ""
+      MAIL_FROM: ""
+      CONTACT_TO: contact-smoke@example.invalid
+      PYTHONDONTWRITEBYTECODE: "1"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout the triggering commit
+        # Official release: https://github.com/actions/checkout/releases/tag/v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run existing unit tests with Python and real Node
+        run: |
+          set -euo pipefail
+          node --version
+          python3 -m venv "$RUNNER_TEMP/$SMOKE_PROJECT-venv"
+          "$RUNNER_TEMP/$SMOKE_PROJECT-venv/bin/python" -m pip install \
+            --disable-pip-version-check -r mail-api/requirements.txt
+          "$RUNNER_TEMP/$SMOKE_PROJECT-venv/bin/python" -m unittest discover -s tests -v
+
+      - name: Prepare an isolated Compose model without published ports
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          project = os.environ["SMOKE_PROJECT"]
+          workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve()
+          result = subprocess.run(
+              ["docker", "compose", "--env-file", "/dev/null", "--project-name", project,
+               "--file", str(workspace / "docker-compose.yml"), "config",
+               "--no-interpolate", "--no-env-resolution", "--format", "json"],
+              capture_output=True, text=True, check=True,
+          )
+          model = json.loads(result.stdout)
+          assert set(model["services"]) == {"web", "mail-api"}, "Unexpected Compose services"
+          model["name"] = project
+          model["networks"] = {"default": {"name": project + "-network", "internal": True}}
+          for name, service in model["services"].items():
+              service.pop("ports", None)
+              service.pop("container_name", None)
+              assert not service.get("network_mode"), "Host or shared networking is not allowed"
+              service["networks"] = {"default": None}
+              service["image"] = project + "-" + name + ":ci"
+              service["build"]["context"] = str(workspace)
+              service["restart"] = "no"
+          # Replace the entire mapping; do not inherit SMTP values from any environment.
+          # Omitted SMTP_SECURITY/TIMEOUT use the application's non-secret defaults.
+          model["services"]["mail-api"]["environment"] = {
+              "HOST": "0.0.0.0", "PORT": "8000", "SMTP_HOST": "", "SMTP_PORT": "",
+              "SMTP_USERNAME": "", "SMTP_PASSWORD": "", "MAIL_FROM": "",
+              "CONTACT_TO": "contact-smoke@example.invalid",
+          }
+          serialized = json.dumps(model, indent=2)
+          assert not re.search(r"\$(?:\{|[A-Za-z_])", serialized), "Unresolved Compose interpolation"
+          target = Path(os.environ["RUNNER_TEMP"]) / (project + ".json")
+          target.write_text(serialized + "\n")
+          PY
+          docker compose --env-file /dev/null --project-name "$SMOKE_PROJECT" \
+            --file "$RUNNER_TEMP/$SMOKE_PROJECT.json" config --quiet
+
+      - name: Build both production Dockerfiles once
+        run: |
+          set -euo pipefail
+          docker compose --env-file /dev/null --project-name "$SMOKE_PROJECT" \
+            --file "$RUNNER_TEMP/$SMOKE_PROJECT.json" build --pull web mail-api
+
+      - name: Start only the isolated CI project
+        run: |
+          set -euo pipefail
+          docker compose --env-file /dev/null --project-name "$SMOKE_PROJECT" \
+            --file "$RUNNER_TEMP/$SMOKE_PROJECT.json" up --detach --no-build \
+            --wait --wait-timeout 120
+
+      - name: Validate Nginx configuration
+        run: |
+          set -euo pipefail
+          docker compose --env-file /dev/null --project-name "$SMOKE_PROJECT" \
+            --file "$RUNNER_TEMP/$SMOKE_PROJECT.json" exec -T web nginx -t
+
+      - name: Check served footer, SVG and honest 503 without SMTP
+        run: |
+          set -euo pipefail
+          docker compose --env-file /dev/null --project-name "$SMOKE_PROJECT" \
+            --file "$RUNNER_TEMP/$SMOKE_PROJECT.json" exec -T mail-api python - <<'PY'
+          from html.parser import HTMLParser
+          import json
+          import os
+          from urllib.error import HTTPError
+          from urllib.parse import urlsplit
+          from urllib.request import build_opener, ProxyHandler, Request
+          from xml.etree import ElementTree
+
+          for name in ("SMTP_HOST", "SMTP_PORT", "SMTP_SECURITY", "SMTP_TIMEOUT",
+                       "SMTP_USERNAME", "SMTP_PASSWORD", "MAIL_FROM"):
+              assert os.environ.get(name, "") == "", name + " must be empty or absent"
+          assert os.environ["CONTACT_TO"] == "contact-smoke@example.invalid"
+          opener = build_opener(ProxyHandler({}))
+
+          class Logos(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.in_footer = False
+                  self.total = 0
+                  self.footer = 0
+
+              def handle_starttag(self, tag, attrs):
+                  if tag == "footer":
+                      self.in_footer = True
+                  src = dict(attrs).get("src", "")
+                  if tag == "img" and urlsplit(src).path.lstrip("/") == "assets/respaldo/cac.svg":
+                      self.total += 1
+                      self.footer += int(self.in_footer)
+
+              def handle_endtag(self, tag):
+                  if tag == "footer":
+                      self.in_footer = False
+
+          with opener.open("http://web:8080/", timeout=10) as response:
+              assert response.status == 200
+              assert response.headers.get_content_type() == "text/html"
+              logos = Logos()
+              logos.feed(response.read().decode("utf-8"))
+              assert logos.total >= 2 and logos.footer >= 1, "CAC logo missing from served footer"
+          with opener.open("http://web:8080/assets/respaldo/cac.svg", timeout=10) as response:
+              assert response.status == 200
+              assert response.headers.get_content_type() == "image/svg+xml"
+              assert ElementTree.fromstring(response.read()).tag.rsplit("}", 1)[-1] == "svg"
+
+          payload = {
+              "nombre": "Prueba CI", "empresa": "Example CI", "email": "visitor@example.invalid",
+              "telefono": "", "industria": "Otra", "mensaje": "Prueba sin SMTP.", "website": "",
+          }
+          request = Request(
+              "http://web:8080/api/contact", data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json", "Accept": "application/json"},
+              method="POST",
+          )
+          try:
+              with opener.open(request, timeout=15) as response:
+                  raise AssertionError("Unconfigured SMTP must return 503, got " + str(response.status))
+          except HTTPError as error:
+              with error:
+                  assert error.code == 503, "Expected 503, got " + str(error.code)
+                  assert error.headers.get_content_type() == "application/json"
+                  result = json.loads(error.read())
+                  assert result["ok"] is False
+                  assert isinstance(result["message"], str) and result["message"].strip()
+          print("Smoke OK: served footer/SVG, Nginx-to-API JSON503; SMTP remains unconfigured.")
+          PY
+
+      - name: Clean up only this CI project
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [[ -f "$RUNNER_TEMP/$SMOKE_PROJECT.json" ]]; then
+            docker compose --env-file /dev/null --project-name "$SMOKE_PROJECT" \
+              --file "$RUNNER_TEMP/$SMOKE_PROJECT.json" down --volumes --remove-orphans --rmi all
+          fi

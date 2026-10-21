@@ -277,25 +277,69 @@
   })();
 
   // Formulario de contacto
-  // TODO: conectar con el backend o servicio de formularios que se defina.
   const form = document.getElementById('contactForm');
   const status = document.getElementById('formStatus');
-  form.addEventListener('submit', (e) => {
+  const submitButton = form.querySelector('[type="submit"]');
+  let sending = false;
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    let valid = true;
-    form.querySelectorAll('[required]').forEach(input => {
-      const ok = input.value.trim() !== '' && input.checkValidity();
+    if (sending) return;
+
+    const fields = [...form.querySelectorAll('input, select, textarea')].filter(input => !input.disabled);
+    let firstInvalid = null;
+    fields.forEach(input => {
+      const withinLimit = !(input.maxLength >= 0) || input.value.length <= input.maxLength;
+      const ok = (!input.required || input.value.trim() !== '') && withinLimit && input.checkValidity();
       input.classList.toggle('is-invalid', !ok);
-      if (!ok) valid = false;
+      input.setAttribute('aria-invalid', String(!ok));
+      if (!ok && !firstInvalid) firstInvalid = input;
     });
-    if (!valid) {
+    if (firstInvalid) {
       status.textContent = 'Revisá los campos marcados para continuar.';
       status.className = 'form__status err';
+      firstInvalid.focus();
       return;
     }
-    status.textContent = '¡Gracias! Recibimos tu consulta y te vamos a contactar a la brevedad.';
-    status.className = 'form__status ok';
-    form.reset();
+
+    const payload = Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, value.trim()]));
+    const buttonText = submitButton.textContent;
+    sending = true;
+    fields.forEach(input => { input.disabled = true; });
+    submitButton.disabled = true;
+    submitButton.setAttribute('aria-busy', 'true');
+    submitButton.textContent = 'Enviando…';
+    form.setAttribute('aria-busy', 'true');
+    status.textContent = 'Estamos enviando tu consulta…';
+    status.className = 'form__status';
+
+    try {
+      const response = await fetch(form.action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      const message = data && typeof data.message === 'string' && data.message.trim() ? data.message : '';
+      if (!response.ok || !data || data.ok !== true || !message) {
+        const errorMessage = message || (data && typeof data.error === 'string' && data.error.trim() ? data.error : '');
+        status.textContent = errorMessage || 'No pudimos confirmar el envío de tu consulta. Podés escribirnos a info@tandemtech.com.ar.';
+        status.className = 'form__status err';
+        return;
+      }
+      status.textContent = message;
+      status.className = 'form__status ok';
+      form.reset();
+    } catch (error) {
+      status.textContent = 'No pudimos confirmar si tu consulta fue enviada. Para evitar duplicarla, consultanos en info@tandemtech.com.ar.';
+      status.className = 'form__status err';
+    } finally {
+      sending = false;
+      fields.forEach(input => { input.disabled = false; });
+      submitButton.disabled = false;
+      submitButton.removeAttribute('aria-busy');
+      submitButton.textContent = buttonText;
+      form.removeAttribute('aria-busy');
+    }
   });
 
   document.getElementById('year').textContent = new Date().getFullYear();

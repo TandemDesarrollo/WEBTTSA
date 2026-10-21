@@ -5,6 +5,9 @@ services:
       dockerfile: Dockerfile
     image: webttsa:local
     container_name: webttsa
+    depends_on:
+      mail-api:
+        condition: service_healthy
     ports:
       - "${PORT:-8080}:8080"
     restart: unless-stopped
@@ -14,3 +17,26 @@ services:
       - /var/cache/nginx:uid=101,gid=101,mode=0755
       - /var/run:uid=101,gid=101,mode=0755
       - /tmp:uid=101,gid=101,mode=1777
+
+  mail-api:
+    build:
+      context: .
+      dockerfile: mail-api/Dockerfile
+    image: webttsa-mail-api:local
+    expose:
+      - "8000"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=1777
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8000"
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-}"
+      SMTP_SECURITY: "${SMTP_SECURITY:-starttls}"
+      SMTP_TIMEOUT: "${SMTP_TIMEOUT:-15}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      MAIL_FROM: "${MAIL_FROM:-}"
+      CONTACT_TO: "${CONTACT_TO:-info@tandemtech.com.ar}"

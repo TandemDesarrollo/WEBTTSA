@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem('tandem-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20261021-footer-1">
 </head>
 <body>
   <canvas class="site-net" id="heroNet" aria-hidden="true"></canvas>
@@ -530,23 +530,23 @@
           </ul>
         </div>
 
-        <form class="form reveal" id="contactForm" novalidate>
+        <form class="form reveal" id="contactForm" action="/api/contact" method="post" novalidate>
           <div class="form__row">
-            <label>Nombre<input type="text" name="nombre" required autocomplete="name"></label>
-            <label>Empresa<input type="text" name="empresa" required autocomplete="organization"></label>
+            <label>Nombre<input type="text" name="nombre" required maxlength="120" autocomplete="name"></label>
+            <label>Empresa<input type="text" name="empresa" required maxlength="160" autocomplete="organization"></label>
           </div>
           <div class="form__row">
-            <label>Email<input type="email" name="email" required autocomplete="email"></label>
-            <label>Teléfono<input type="tel" name="telefono" autocomplete="tel"></label>
+            <label>Email<input type="email" name="email" required maxlength="254" autocomplete="email"></label>
+            <label>Teléfono<input type="tel" name="telefono" maxlength="60" autocomplete="tel"></label>
           </div>
           <label>Industria
             <select name="industria">
               <option>Banca</option><option>Fintech</option><option>Retail</option><option>Telecomunicaciones</option><option>Servicios</option><option>Otra</option>
             </select>
           </label>
-          <label>Mensaje<textarea name="mensaje" rows="4" placeholder="Contanos sobre tu cartera y tus objetivos"></textarea></label>
+          <label>Mensaje<textarea name="mensaje" rows="4" maxlength="5000" placeholder="Contanos sobre tu cartera y tus objetivos"></textarea></label>
           <button type="submit" class="btn btn--primary btn--block">Enviar consulta</button>
-          <p class="form__status" id="formStatus" role="status"></p>
+          <p class="form__status" id="formStatus" role="status" aria-live="polite" aria-atomic="true"></p>
         </form>
       </div>
     </section>
@@ -562,10 +562,13 @@
         <a href="#nosotros">Nosotros</a>
         <a href="https://gestionesusdeudas.com.ar/login" target="_blank" rel="noopener">Gestioná Sus Deudas</a>
       </nav>
+      <div class="footer__institution">
+        <img src="assets/respaldo/cac.svg" alt="Cámara Argentina de Comercio y Servicios" width="311" height="76" loading="lazy">
+      </div>
       <p class="footer__copy">© <span id="year">2026</span> Tandem Technology S.A. · Somos Tandem</p>
     </div>
   </footer>
 
-  <script src="script.js"></script>
+  <script src="script.js?v=20261021-contact-1"></script>
 </body>
 </html>

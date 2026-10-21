@@ -345,6 +345,9 @@ p { margin: 0 0 1em; }
 .countries__list i { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 0 3px rgba(255,255,255,.25); flex: none; }
 .countries__list small { width: 100%; padding-left: 18px; margin-top: -4px; font-size: .72rem; font-weight: 600; color: var(--peach); letter-spacing: .04em; }
 .countries p { opacity: .9; margin: 0; position: relative; z-index: 1; }
+.countries__institution { width: 100%; max-width: 340px; margin: 24px auto 0; padding: 18px 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 16px; background: #140a0e; color: #fff; }
+.countries__institution img { display: block; width: 100%; max-width: 311px; height: auto; }
+.countries__institution small { font-size: .8rem; color: rgba(255,255,255,.75); }
 @media (max-width: 400px) { .countries__body { grid-template-columns: 1fr; } .samap { max-height: 340px; } }
 
 .certs { margin-top: 72px; display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }

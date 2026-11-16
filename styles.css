@@ -263,7 +263,7 @@ p { margin: 0 0 1em; }
 .chat__msg--user { align-self: flex-end; background: var(--orange); color: #fff; border-bottom-right-radius: 4px; }
 
 /* Proceso */
-.steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; counter-reset: s; position: relative; }
+.steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; counter-reset: s; position: relative; }
 .steps::before { content: ""; position: absolute; top: 30px; left: 30px; right: 30px; height: 2px; background: linear-gradient(90deg, var(--orange), var(--mauve)); opacity: .5; }
 .step { position: relative; }
 .step__num {
@@ -674,8 +674,7 @@ p { margin: 0 0 1em; }
   .grid--4 { grid-template-columns: repeat(2, 1fr); }
   .tech { grid-template-columns: repeat(2, 1fr); }
   .tech__card--wide { grid-row: auto; }
-  .steps { grid-template-columns: repeat(2, 1fr); row-gap: 40px; }
-  .steps::before { display: none; }
+  .steps { grid-template-columns: repeat(3, 1fr); }
   .certs { grid-template-columns: repeat(3, 1fr); }
 }
 

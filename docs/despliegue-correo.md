@@ -14,9 +14,13 @@ El código puede publicarse y quedar preparado con SMTP pendiente, sin obtener a
 - `SMTP_USERNAME` y `SMTP_PASSWORD`: ambos para autenticación SMTP con usuario y contraseña, si el proveedor permite ese mecanismo. Ambos vacíos solo corresponden a un relay autorizado que no requiera login. No se implementa OAuth; si el proveedor lo exige, detener la habilitación del envío y definir la integración necesaria. Las credenciales se cargan directamente en el panel autorizado, no por chat ni en Git.
 - `CONTACT_TO`: un único destinatario. Se conserva `info@tandemtech.com.ar`, ya publicado en el sitio, salvo cambio confirmado por su responsable. Compose utiliza ese valor predeterminado si la variable está vacía o ausente. El email del visitante solo se usa en `Reply-To`.
 
+## Protección contra spam
+
+El formulario envía un campo trampa `website` oculto; si llega con contenido, la API responde 400 sin conectar con SMTP. reCAPTCHA v3 es opcional: se activa al cargar `RECAPTCHA_SECRET_KEY` en `mail-api` y la clave de sitio en el atributo `data-recaptcha-key` del formulario de `index.html`. Con la clave secreta, la API exige `recaptcha_token`, lo valida contra `https://www.google.com/recaptcha/api/siteverify` (10 segundos de espera) y acepta solo la acción `contact` con puntaje igual o mayor a `RECAPTCHA_MIN_SCORE` (0.5 por defecto). Un token ausente o rechazado devuelve 403; si no se puede consultar a Google, 503. En ambos casos no se envía correo. `mail-api` necesita salida HTTPS hacia Google además de la salida SMTP. Los registros no incluyen tokens ni la clave secreta.
+
 ## Cómo llegan las variables al contenedor
 
-El apartado `environment` de `mail-api` en `docker-compose.yml` enumera las ocho variables de correo. Compose interpola sus valores y los inyecta explícitamente al contenedor API; no se pasan al frontend ni a Nginx. El `.env` de interpolación, por sí solo, no inyectaría variables en un contenedor. El backend tampoco carga archivos `.env`.
+El apartado `environment` de `mail-api` en `docker-compose.yml` enumera las ocho variables de correo y las dos de reCAPTCHA. Compose interpola sus valores y los inyecta explícitamente al contenedor API; no se pasan al frontend ni a Nginx. El `.env` de interpolación, por sí solo, no inyectaría variables en un contenedor. El backend tampoco carga archivos `.env`.
 
 `PORT` en el ejemplo controla únicamente el puerto publicado del servicio web. La API recibe `PORT=8000` en su propio servicio. Las imágenes copian únicamente los archivos necesarios y `.dockerignore` excluye los archivos `.env` privados. La API se ejecuta con UID/GID 10001, filesystem de solo lectura y `/tmp` temporal.
 

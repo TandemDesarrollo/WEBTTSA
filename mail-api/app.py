@@ -1,5 +1,6 @@
 """API interna del formulario TTSA; Nginx publica únicamente /api/contact."""
 import ipaddress
+import json
 import os
 import re
 import smtplib
@@ -7,6 +8,8 @@ import ssl
 import unicodedata
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import HTTPException
@@ -26,6 +29,18 @@ INDUSTRIES = {"Banca", "Fintech", "Retail", "Telecomunicaciones", "Servicios", "
 SEND_ERROR = (
     "No pudimos confirmar el envío de tu consulta. Podés escribirnos a "
     "info@tandemtech.com.ar."
+)
+RECAPTCHA_VERIFY_URL = "https://www.google.com/recaptcha/api/siteverify"
+RECAPTCHA_ACTION = "contact"
+RECAPTCHA_TOKEN_LIMIT = 8192
+RECAPTCHA_TIMEOUT = 10
+RECAPTCHA_REJECTED = (
+    "No pudimos verificar que la consulta la envía una persona. Probá de nuevo "
+    "o escribinos a info@tandemtech.com.ar."
+)
+RECAPTCHA_UNAVAILABLE = (
+    "No pudimos verificar la consulta en este momento. Probá de nuevo más tarde "
+    "o escribinos a info@tandemtech.com.ar."
 )
 
 
@@ -87,6 +102,41 @@ def mail_settings():
     ):
         raise ValueError("Configuración SMTP incompleta o inválida")
     return host, port, username, password, sender, recipient, security, timeout
+
+
+def recaptcha_settings():
+    """reCAPTCHA v3 queda activo solo si hay clave secreta; sin ella no se verifica."""
+    secret = os.environ.get("RECAPTCHA_SECRET_KEY", "").strip()
+    if not secret:
+        return None
+    min_score = float(os.environ.get("RECAPTCHA_MIN_SCORE", "").strip() or "0.5")
+    if not 0 <= min_score <= 1:
+        raise ValueError("RECAPTCHA_MIN_SCORE fuera de rango")
+    return secret, min_score
+
+
+def verify_recaptcha(token, settings):
+    """Consulta a Google; True solo si el token es válido, de esta acción y con score suficiente."""
+    secret, min_score = settings
+    request_body = urlencode({"secret": secret, "response": token}).encode("ascii")
+    verify_request = Request(
+        RECAPTCHA_VERIFY_URL,
+        data=request_body,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    with urlopen(verify_request, timeout=RECAPTCHA_TIMEOUT) as response:
+        result = json.loads(response.read())
+    if not isinstance(result, dict):
+        raise ValueError("Respuesta inesperada de reCAPTCHA")
+    score = result.get("score")
+    return (
+        result.get("success") is True
+        and result.get("action") == RECAPTCHA_ACTION
+        and isinstance(score, (int, float))
+        and not isinstance(score, bool)
+        and score >= min_score
+    )
 
 
 def send_contact(fields, settings):
@@ -191,6 +241,27 @@ def contact():
         or (fields["industria"] and fields["industria"] not in INDUSTRIES)
     ):
         return contact_error("Revisá los campos obligatorios y el email.", 400)
+
+    token = data.get("recaptcha_token", "")
+    if not isinstance(token, str) or len(token) > RECAPTCHA_TOKEN_LIMIT:
+        return contact_error("Revisá los datos del formulario.", 400)
+    try:
+        captcha = recaptcha_settings()
+    except (ValueError, OverflowError):
+        app.logger.error("La configuración de reCAPTCHA es inválida.")
+        return contact_error(SEND_ERROR, 503)
+    if captcha:
+        if not token.strip():
+            return contact_error(RECAPTCHA_REJECTED, 403)
+        try:
+            human = verify_recaptcha(token.strip(), captcha)
+        except (OSError, ValueError) as error:
+            # No registrar el token ni la clave secreta.
+            app.logger.error("No se pudo verificar reCAPTCHA (%s).", type(error).__name__)
+            return contact_error(RECAPTCHA_UNAVAILABLE, 503)
+        if not human:
+            app.logger.warning("Consulta rechazada por reCAPTCHA.")
+            return contact_error(RECAPTCHA_REJECTED, 403)
 
     try:
         settings = mail_settings()

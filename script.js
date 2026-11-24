@@ -281,6 +281,41 @@
   const status = document.getElementById('formStatus');
   const submitButton = form.querySelector('[type="submit"]');
   let sending = false;
+
+  // reCAPTCHA v3: solo si el formulario declara la clave de sitio. El script de Google se
+  // carga recién cuando el visitante empieza a usar el formulario.
+  const recaptchaKey = ((form.dataset && form.dataset.recaptchaKey) || '').trim();
+  let recaptchaLoad = null;
+  const loadRecaptcha = () => {
+    if (!recaptchaLoad) {
+      recaptchaLoad = new Promise((resolve, reject) => {
+        const fail = () => { clearTimeout(timeout); recaptchaLoad = null; reject(new Error('reCAPTCHA no disponible')); };
+        const timeout = setTimeout(fail, 10000);
+        const script = document.createElement('script');
+        script.src = 'https://www.google.com/recaptcha/api.js?render=' + encodeURIComponent(recaptchaKey);
+        script.async = true;
+        script.onerror = fail;
+        script.onload = () => {
+          const api = window.grecaptcha;
+          if (!api || typeof api.ready !== 'function') { fail(); return; }
+          api.ready(() => { clearTimeout(timeout); resolve(api); });
+        };
+        document.head.appendChild(script);
+      });
+    }
+    return recaptchaLoad;
+  };
+  const recaptchaToken = async () => {
+    const api = await loadRecaptcha();
+    const token = await api.execute(recaptchaKey, { action: 'contact' });
+    if (typeof token !== 'string' || !token) throw new Error('reCAPTCHA sin token');
+    return token;
+  };
+  if (recaptchaKey) {
+    form.addEventListener('focusin', () => { loadRecaptcha().catch(() => {}); }, { once: true });
+    const notice = document.getElementById('recaptchaNotice');
+    if (notice) notice.hidden = false;
+  }
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (sending) return;
@@ -313,6 +348,15 @@
     status.className = 'form__status';
 
     try {
+      if (recaptchaKey) {
+        try {
+          payload.recaptcha_token = await recaptchaToken();
+        } catch (error) {
+          status.textContent = 'No pudimos verificar el formulario. Probá de nuevo en unos segundos o escribinos a info@tandemtech.com.ar.';
+          status.className = 'form__status err';
+          return;
+        }
+      }
       const response = await fetch(form.action, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },

@@ -18,7 +18,7 @@ class FrontendTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         report = json.loads(result.stdout)
-        self.assertEqual(report["passed"], 11)
+        self.assertEqual(report["passed"], 13)
         self.assertEqual(len(report["cases"]), report["passed"])
 
 

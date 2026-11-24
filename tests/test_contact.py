@@ -281,6 +281,104 @@ class ContactTests(unittest.TestCase):
     def test_honeypot_can_be_empty(self):
         self.assertEqual(self.post({**self.payload, "website": ""}).status_code, 200)
 
+    def test_form_includes_hidden_honeypot(self):
+        parser = FormParser()
+        parser.feed((PROJECT_ROOT / "index.html").read_text())
+        honeypot = parser.fields.get("website")
+        self.assertIsNotNone(honeypot, "El formulario debe incluir el campo trampa website")
+        self.assertEqual(honeypot.get("tabindex"), "-1")
+        self.assertEqual(honeypot.get("autocomplete"), "off")
+        self.assertNotIn("required", honeypot)
+        self.assertIn("data-recaptcha-key", parser.form)
+
+    # --- reCAPTCHA v3: la verificación con Google siempre se simula ---
+
+    def enable_recaptcha(self, reply=None, error=None, **environment):
+        os.environ.update({"RECAPTCHA_SECRET_KEY": "secret-test", **environment})
+        verify = patch.object(server, "urlopen")
+        urlopen = verify.start()
+        self.addCleanup(verify.stop)
+        if error is not None:
+            urlopen.side_effect = error
+        else:
+            body = server.json.dumps(
+                {"success": True, "action": "contact", "score": 0.9} if reply is None else reply
+            ).encode()
+            urlopen.return_value.__enter__.return_value.read.return_value = body
+        return urlopen
+
+    def test_recaptcha_is_skipped_without_secret(self):
+        with patch.object(server, "urlopen") as urlopen:
+            self.assertEqual(self.post({**self.payload, "recaptcha_token": "ignored"}).status_code, 200)
+        urlopen.assert_not_called()
+
+    def test_recaptcha_valid_token_sends_and_never_leaks_secret_to_mail(self):
+        urlopen = self.enable_recaptcha()
+        response = self.post({**self.payload, "recaptcha_token": " token-ok "})
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(response.get_json()["ok"], True)
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, server.RECAPTCHA_VERIFY_URL)
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.data, b"secret=secret-test&response=token-ok")
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], server.RECAPTCHA_TIMEOUT)
+        message = self.smtp.send_message.call_args.args[0]
+        self.assertNotIn("token-ok", message.as_string())
+        self.assertNotIn("secret-test", message.as_string())
+
+    def test_recaptcha_missing_or_invalid_token_is_rejected_before_smtp(self):
+        urlopen = self.enable_recaptcha()
+        for token in (None, "", "   "):
+            payload = dict(self.payload)
+            if token is not None:
+                payload["recaptcha_token"] = token
+            with self.subTest(token=token):
+                self.assert_error(self.post(payload), 403)
+        for token in (42, ["list"], "x" * (server.RECAPTCHA_TOKEN_LIMIT + 1)):
+            with self.subTest(token=str(token)[:20]):
+                self.assert_error(self.post({**self.payload, "recaptcha_token": token}), 400)
+        urlopen.assert_not_called()
+        self.assert_no_smtp()
+
+    def test_recaptcha_rejections_never_send(self):
+        for reply in (
+            {"success": False, "error-codes": ["invalid-input-response"]},
+            {"success": True, "action": "contact", "score": 0.3},
+            {"success": True, "action": "login", "score": 0.9},
+            {"success": True, "action": "contact"},
+            {"success": True, "action": "contact", "score": True},
+            {"success": "true", "action": "contact", "score": 0.9},
+        ):
+            with self.subTest(reply=reply):
+                self.enable_recaptcha(reply=reply)
+                self.assert_error(self.post({**self.payload, "recaptcha_token": "tok"}), 403)
+        self.assert_no_smtp()
+
+    def test_recaptcha_min_score_is_configurable(self):
+        self.enable_recaptcha(reply={"success": True, "action": "contact", "score": 0.3}, RECAPTCHA_MIN_SCORE="0.3")
+        self.assertEqual(self.post({**self.payload, "recaptcha_token": "tok"}).status_code, 200)
+
+    def test_recaptcha_invalid_min_score_is_unavailable(self):
+        for value in ("1.5", "-0.1", "abc", "nan"):
+            with self.subTest(value=value):
+                urlopen = self.enable_recaptcha(RECAPTCHA_MIN_SCORE=value)
+                self.assert_error(self.post({**self.payload, "recaptcha_token": "tok"}), 503)
+                urlopen.assert_not_called()
+        self.assert_no_smtp()
+
+    def test_recaptcha_outage_is_unavailable_and_does_not_log_secrets(self):
+        for error in (OSError("network down"), TimeoutError("timeout")):
+            with self.subTest(error=type(error).__name__):
+                self.enable_recaptcha(error=error)
+                with self.assertLogs(server.app.logger, level="ERROR") as logs:
+                    self.assert_error(self.post({**self.payload, "recaptcha_token": "tok-secreto"}), 503)
+                joined = "\n".join(logs.output)
+                self.assertNotIn("tok-secreto", joined)
+                self.assertNotIn("secret-test", joined)
+        self.enable_recaptcha(reply=["not", "a", "dict"])
+        self.assert_error(self.post({**self.payload, "recaptcha_token": "tok"}), 503)
+        self.assert_no_smtp()
+
     def test_nul_and_control_characters_are_rejected(self):
         for field in self.payload:
             for control in ("\x00", "\x7f", "\x85", "\ud800"):

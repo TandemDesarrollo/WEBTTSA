@@ -398,6 +398,12 @@ p { margin: 0 0 1em; }
 .form__status { margin: 0; font-weight: 600; min-height: 1.4em; text-align: center; }
 .form__status.ok { color: #6be3a0; }
 .form__status.err { color: #ff8a7a; }
+/* Campo trampa: fuera de la vista, sin usar display:none para que los bots lo completen */
+.form__hp { position: absolute; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden; }
+/* reCAPTCHA v3: se oculta la insignia flotante y se muestra el aviso legal que Google exige en su lugar */
+.grecaptcha-badge { visibility: hidden; }
+.form__legal { margin: 0; font-size: .75rem; line-height: 1.5; text-align: center; color: var(--muted); }
+.form__legal a { color: inherit; }
 
 /* Footer */
 .footer { padding: 48px 0; border-top: 1px solid var(--line); background: rgba(10,2,4,.88); }

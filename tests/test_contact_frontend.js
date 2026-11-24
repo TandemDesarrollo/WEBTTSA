@@ -17,7 +17,7 @@ async function runContactFrontendTests(source) {
     if (!condition) throw new Error(message);
   }
 
-  function setup(fetchReply) {
+  function setup(fetchReply, options = {}) {
     const calls = [];
     const timers = new Map();
     const attrs = new Map();
@@ -43,8 +43,10 @@ async function runContactFrontendTests(source) {
       focus() { this.focused = true; }
     }));
     let submitHandler;
+    const recaptcha = { scripts: [], executions: [], notice: { hidden: true } };
     const form = {
       action: 'https://example.test/api/contact', resetCount: 0,
+      dataset: options.recaptcha ? { recaptchaKey: ' site-key-test ' } : {},
       querySelector: () => button,
       querySelectorAll(selector) {
         return selector === '[required]' ? fields.filter(field => field.required) : fields;
@@ -59,7 +61,24 @@ async function runContactFrontendTests(source) {
         if (id === 'contactForm') return form;
         if (id === 'formStatus') return status;
         if (id === 'year') return {};
+        if (id === 'recaptchaNotice' && options.recaptcha) return recaptcha.notice;
         throw new Error(`Elemento inesperado: ${id}`);
+      },
+      createElement(tag) {
+        assert(options.recaptcha && tag === 'script', 'Solo debe crear el script de reCAPTCHA si hay clave');
+        return {};
+      },
+      head: {
+        appendChild(script) {
+          recaptcha.scripts.push(script);
+          Promise.resolve().then(() => (options.recaptcha === 'load-error' ? script.onerror() : script.onload()));
+        }
+      }
+    };
+    const window = {
+      grecaptcha: {
+        ready(callback) { callback(); },
+        async execute(key, settings) { recaptcha.executions.push({ key, settings }); return 'token-test'; }
       }
     };
     class SimulatedFormData {
@@ -84,14 +103,14 @@ async function runContactFrontendTests(source) {
       return fetchReply(url, options);
     };
     let timerId = 0;
-    new Function('document', 'fetch', 'FormData', 'AbortController', 'setTimeout', 'clearTimeout', handlerSource)(
-      document, fetch, SimulatedFormData, SimulatedAbortController,
+    new Function('document', 'window', 'fetch', 'FormData', 'AbortController', 'setTimeout', 'clearTimeout', handlerSource)(
+      document, window, fetch, SimulatedFormData, SimulatedAbortController,
       (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; },
       id => timers.delete(id)
     );
     assert(typeof submitHandler === 'function', 'No se registró el submit');
     return {
-      form, fields, status, button, buttonAttrs, attrs, calls, timers,
+      form, fields, status, button, buttonAttrs, attrs, calls, timers, recaptcha,
       submit() {
         let prevented = false;
         const pending = submitHandler({ preventDefault() { prevented = true; } });
@@ -155,6 +174,8 @@ async function runContactFrontendTests(source) {
     Object.entries(initialValues).forEach(([name, value]) => {
       assert(payload[name] === value.trim(), `Debe enviar el campo ${name} completo y sin espacios exteriores`);
     });
+    assert(!('recaptcha_token' in payload), 'Sin clave de sitio no debe enviar token de reCAPTCHA');
+    assert(env.recaptcha.scripts.length === 0, 'Sin clave de sitio no debe cargar reCAPTCHA');
     resolve({ ok: true, json: async () => ({ ok: true, message: 'Consulta aceptada.' }) });
     await pending;
     assert(env.form.resetCount === 1, 'Debe borrar datos al confirmar');
@@ -268,6 +289,31 @@ async function runContactFrontendTests(source) {
     assert(env.calls.length === 2, 'Debe permitir un nuevo envío tras el fallo');
     assert(env.form.resetCount === 1, 'Solo el envío aceptado debe borrar datos');
     assertRestored(env);
+  });
+
+  await test('adds a reCAPTCHA v3 token for the contact action when a site key is set', async () => {
+    const env = setup(() => response({ ok: true, message: 'Consulta aceptada.' }), { recaptcha: 'ok' });
+    assert(env.recaptcha.notice.hidden === false, 'Debe mostrar el aviso legal de reCAPTCHA');
+    await env.submit();
+    assert(env.recaptcha.scripts.length === 1, 'Debe cargar el script de reCAPTCHA una vez');
+    assert(env.recaptcha.scripts[0].src === 'https://www.google.com/recaptcha/api.js?render=site-key-test', 'Debe cargar reCAPTCHA con la clave de sitio');
+    assert(env.recaptcha.executions.length === 1, 'Debe pedir un token por envío');
+    assert(env.recaptcha.executions[0].key === 'site-key-test', 'Debe usar la clave de sitio');
+    assert(env.recaptcha.executions[0].settings.action === 'contact', 'Debe usar la acción contact');
+    assert(env.calls.length === 1, 'Debe enviar la consulta');
+    assert(JSON.parse(env.calls[0].options.body).recaptcha_token === 'token-test', 'Debe enviar el token');
+    assert(env.form.resetCount === 1, 'Debe borrar datos al confirmar');
+    assertRestored(env);
+  });
+
+  await test('does not submit when reCAPTCHA cannot load, and keeps the data', async () => {
+    const env = setup(() => { throw new Error('No debe iniciar fetch'); }, { recaptcha: 'load-error' });
+    const before = values(env);
+    await env.submit();
+    assert(env.calls.length === 0, 'Sin token no debe enviar la consulta');
+    assertFailure(env, before);
+    await env.submit();
+    assert(env.recaptcha.scripts.length === 2, 'Debe reintentar la carga en el siguiente envío');
   });
 
   return { passed: results.length, cases: results };

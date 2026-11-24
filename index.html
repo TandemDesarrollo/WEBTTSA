@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script>try{var t=localStorage.getItem('tandem-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
-  <link rel="stylesheet" href="styles.css?v=20261124-linkedin-1">
+  <link rel="stylesheet" href="styles.css?v=20261124-antispam-1">
 </head>
 <body>
   <canvas class="site-net" id="heroNet" aria-hidden="true"></canvas>
@@ -529,7 +529,8 @@
           </ul>
         </div>
 
-        <form class="form reveal" id="contactForm" action="/api/contact" method="post" novalidate>
+        <!-- data-recaptcha-key: clave de sitio (pública) de reCAPTCHA v3; vacía lo desactiva en el navegador -->
+        <form class="form reveal" id="contactForm" action="/api/contact" method="post" novalidate data-recaptcha-key="6LegVjAuAAAAAHzCY5ZyyT-uDEVysC9QEuTSogNV">
           <div class="form__row">
             <label>Nombre<input type="text" name="nombre" required maxlength="120" autocomplete="name"></label>
             <label>Empresa<input type="text" name="empresa" required maxlength="160" autocomplete="organization"></label>
@@ -544,8 +545,13 @@
             </select>
           </label>
           <label>Mensaje<textarea name="mensaje" rows="4" maxlength="5000" placeholder="Contanos sobre tu cartera y tus objetivos"></textarea></label>
+          <!-- Campo trampa: invisible para personas; si llega completo, el backend descarta la consulta -->
+          <div class="form__hp" aria-hidden="true">
+            <label>No completar este campo<input type="text" name="website" maxlength="200" tabindex="-1" autocomplete="off"></label>
+          </div>
           <button type="submit" class="btn btn--primary btn--block">Enviar consulta</button>
           <p class="form__status" id="formStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+          <p class="form__legal" id="recaptchaNotice" hidden>Este sitio está protegido por reCAPTCHA y se aplican la <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Política de privacidad</a> y las <a href="https://policies.google.com/terms" target="_blank" rel="noopener noreferrer">Condiciones del servicio</a> de Google.</p>
         </form>
       </div>
     </section>
@@ -573,6 +579,6 @@
     </div>
   </footer>
 
-  <script src="script.js?v=20261021-contact-1"></script>
+  <script src="script.js?v=20261124-antispam-1"></script>
 </body>
 </html>
